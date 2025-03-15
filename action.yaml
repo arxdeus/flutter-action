@@ -6,22 +6,10 @@ branding:
   color: blue
 
 inputs:
-  channel:
-    description: The Flutter build release channel
-    required: false
-    default: stable
   flutter-version:
     description: The Flutter version to make available on the path
     required: false
     default: ""
-  flutter-version-file:
-    description: The pubspec.yaml file with exact Flutter version defined
-    required: false
-    default: ""
-  architecture:
-    description: The architecture of Flutter SDK executable (x64 or arm64)
-    required: false
-    default: "${{ runner.arch }}"
   cache:
     description: Cache the Flutter SDK
     required: false
@@ -33,7 +21,7 @@ inputs:
   cache-path:
     description: Flutter SDK cache path
     required: false
-    default: ""
+    default: "flutter-folder"
   pub-cache-key:
     description: Identifier for the Dart .pub-cache cache
     required: false
@@ -41,26 +29,16 @@ inputs:
   pub-cache-path:
     description: Flutter pub cache path
     required: false
-    default: default
-  dry-run:
-    description: If true, get outputs but do not install Flutter
-    required: false
-    default: "false"
+    default: "pubcache"
   git-source:
     description: Git clone source
     required: false
     default: "https://github.com/flutter/flutter.git"
 
 outputs:
-  CHANNEL:
-    value: "${{ steps.flutter-action.outputs.CHANNEL }}"
-    description: The selected Flutter release channel
   VERSION:
     value: "${{ steps.flutter-action.outputs.VERSION }}"
     description: The selected Flutter version
-  ARCHITECTURE:
-    value: "${{ steps.flutter-action.outputs.ARCHITECTURE }}"
-    description: The selected Flutter CPU architecture
   CACHE-KEY:
     value: "${{ steps.flutter-action.outputs.CACHE-KEY }}"
     description: Key used to cache the Flutter SDK
@@ -88,24 +66,31 @@ runs:
       run: choco install yq
       shell: bash
 
-    - name: Make setup script executable
-      run: chmod +x "$GITHUB_ACTION_PATH/setup.sh"
-      shell: bash
-
     - name: Set action inputs
       id: flutter-action
       shell: bash
       run: |
-        $GITHUB_ACTION_PATH/setup.sh -p \
-          -n '${{ inputs.flutter-version }}' \
-          -f '${{ inputs.flutter-version-file }}' \
-          -a '${{ inputs.architecture }}' \
-          -k '${{ inputs.cache-key }}' \
-          -c '${{ inputs.cache-path }}' \
-          -l '${{ inputs.pub-cache-key }}' \
-          -d '${{ inputs.pub-cache-path }}' \
-          -g '${{ inputs.git-source }}' \
-          ${{ inputs.channel }}
+        rm -rf /var/lib/apt/lists/* /tmp/* /var/cache/apt/* \
+          /usr/share/man/* /usr/share/doc/*
+
+        mkdir -p ${{ inputs.cache-path }} ${{ inputs.pub-cache-path }}
+        git clone -b ${{ inputs.flutter-version }} --depth 1 ${{ inputs.git-source }} ${{ inputs.cache-path }}
+        cd ${{ inputs.cache-path }}
+        git config --global --add safe.directory ${{ inputs.cache-path }} 
+        git gc --aggressive --prune=all 
+        flutter config --disable-analytics --no-cli-animations
+        flutter precache --universal 
+        flutter doctor --verbose
+        {
+	      echo "FLUTTER_ROOT=${{ inputs.cache-path }}"
+	      echo "PUB_CACHE=${{ inputs.pub-cache-path }}"
+        } >>"${GITHUB_ENV:-/dev/null}"
+
+        {
+	      echo "${{ inputs.cache-path }}/bin"
+	      echo "${{ inputs.cache-path }}/bin/cache/dart-sdk/bin"
+	      echo "${{ inputs.pub-cache-path }}/bin"
+        } >>"${GITHUB_PATH:-/dev/null}"
 
     - name: Cache Flutter
       uses: actions/cache@v4
@@ -125,13 +110,3 @@ runs:
         restore-keys: |
           ${{ steps.flutter-action.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
           ${{ steps.flutter-action.outputs.PUB-CACHE-KEY }}
-
-    - name: Run setup script
-      shell: bash
-      if: ${{ inputs.dry-run != 'true' && inputs.dry-run != true }}
-      run: |
-        $GITHUB_ACTION_PATH/setup.sh \
-          -n '${{ steps.flutter-action.outputs.VERSION }}' \
-          -a '${{ steps.flutter-action.outputs.ARCHITECTURE }}' \
-          -c '${{ steps.flutter-action.outputs.CACHE-PATH }}' \
-          ${{ steps.flutter-action.outputs.CHANNEL }}
