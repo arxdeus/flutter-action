@@ -1,6 +1,6 @@
-name: Set up Flutter
-description: Setup your runner with Flutter environment
-author: Alif Rachmawadi
+name: Flutter Environment
+description: Setup your runner with Flutter lightweight environment
+author: Artemis Kushner
 branding:
   icon: maximize
   color: blue
@@ -9,11 +9,11 @@ inputs:
   flutter-version:
     description: The Flutter version to make available on the path
     required: false
-    default: ""
+    default: "stable"
   cache:
     description: Cache the Flutter SDK
     required: false
-    default: "false"
+    default: "true"
   cache-key:
     description: Identifier for the Flutter SDK cache
     required: false
@@ -21,7 +21,7 @@ inputs:
   cache-path:
     description: Flutter SDK cache path
     required: false
-    default: "flutter-folder"
+    default: "/home/runner/opt/flutter"
   pub-cache-key:
     description: Identifier for the Dart .pub-cache cache
     required: false
@@ -29,7 +29,7 @@ inputs:
   pub-cache-path:
     description: Flutter pub cache path
     required: false
-    default: "pubcache"
+    default: "/home/runner/cache/pub"
   git-source:
     description: Git clone source
     required: false
@@ -66,47 +66,49 @@ runs:
       run: choco install yq
       shell: bash
 
-    - name: Set action inputs
-      id: flutter-action
-      shell: bash
-      run: |
-        rm -rf /var/lib/apt/lists/* /tmp/* /var/cache/apt/* \
-          /usr/share/man/* /usr/share/doc/*
-
-        mkdir -p ${{ inputs.cache-path }} ${{ inputs.pub-cache-path }}
-        git clone -b ${{ inputs.flutter-version }} --depth 1 ${{ inputs.git-source }} ${{ inputs.cache-path }}
-        cd ${{ inputs.cache-path }}
-        git config --global --add safe.directory ${{ inputs.cache-path }} 
-        git gc --aggressive --prune=all 
-        flutter config --disable-analytics --no-cli-animations
-        flutter precache --universal 
-        flutter doctor --verbose
-        {
-	      echo "FLUTTER_ROOT=${{ inputs.cache-path }}"
-	      echo "PUB_CACHE=${{ inputs.pub-cache-path }}"
-        } >>"${GITHUB_ENV:-/dev/null}"
-
-        {
-	      echo "${{ inputs.cache-path }}/bin"
-	      echo "${{ inputs.cache-path }}/bin/cache/dart-sdk/bin"
-	      echo "${{ inputs.pub-cache-path }}/bin"
-        } >>"${GITHUB_PATH:-/dev/null}"
-
     - name: Cache Flutter
       uses: actions/cache@v4
+      id: cache-flutter
       if: ${{ inputs.cache == 'true' }}
       with:
-        path: ${{ steps.flutter-action.outputs.CACHE-PATH }}
-        key: ${{ steps.flutter-action.outputs.CACHE-KEY }}
+        path: ${{ inputs.cache-path }}
+        key: ${{ inputs.flutter-version }}
         restore-keys: |
-          ${{ steps.flutter-action.outputs.CACHE-KEY }}
-
+          ${{ inputs.flutter-version }}
     - name: Cache pub dependencies
       uses: actions/cache@v4
       if: ${{ inputs.cache == 'true' }}
       with:
-        path: ${{ steps.flutter-action.outputs.PUB-CACHE-PATH }}
-        key: ${{ steps.flutter-action.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+        path: ${{ inputs.pub-cache-path }}
+        key: ${{ inputs.flutter-version }}-${{ hashFiles('**/pubspec.lock') }}
         restore-keys: |
-          ${{ steps.flutter-action.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
-          ${{ steps.flutter-action.outputs.PUB-CACHE-KEY }}
+          ${{ inputs.flutter-version }}-${{ hashFiles('**/pubspec.lock') }}
+
+    - name: Set action inputs
+      id: flutter-action
+      if: steps.cache-flutter.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ${{ inputs.cache-path }} ${{ inputs.pub-cache-path }} && \
+        # Download the Flutter SDK from the GitHub repository
+        git clone -b ${{ inputs.flutter-version }} --depth 1 ${{ inputs.git-source }} ${{ inputs.cache-path }} && \
+        cd ${{ inputs.cache-path }} && \
+        # Set the Flutter SDK directory permissions
+        git config --global --add safe.directory ${{ inputs.cache-path }} && \
+        # Clean up the Flutter SDK by running the git garbage collector
+        git gc --aggressive --prune=all && \
+        # Disable Flutter analytics and CLI animations
+        ${{ inputs.cache-path }}/bin/flutter config --disable-analytics --no-cli-animations && \
+        # Precache the Flutter SDK and run the doctor
+        ${{ inputs.cache-path }}/bin/flutter precache --universal && \
+        ${{ inputs.cache-path }}/bin/flutter doctor --verbose
+        cd ..
+
+    - name: Echo variables
+      shell: bash
+      run: |
+        echo "${{ inputs.cache-path }}/bin" >> "$GITHUB_PATH"
+        echo "${{ inputs.pub-cache-path }}/bin" >> "$GITHUB_PATH"
+        echo "${{ inputs.cache-path }}/bin/cache/dart-sdk/bin" >> "$GITHUB_PATH"
+
+
